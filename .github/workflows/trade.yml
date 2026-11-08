@@ -1,0 +1,53 @@
+name: Paper trader
+
+on:
+  schedule:
+    # Mon-Fri at 15:00 UTC = 10:00 New York (EST) / 11:00 (EDT). The US market is open in
+    # both cases (opens 14:30 UTC in winter, 13:30 UTC in summer). GitHub may start this a
+    # few minutes late; that's fine for a daily-bar strategy. The bot also checks the market
+    # clock itself, so holidays are skipped automatically.
+    - cron: "0 15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log decisions, place no orders)"
+        type: boolean
+        default: true
+
+# Never let two runs overlap
+concurrency:
+  group: paper-trader
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run trader
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # optional; leave the secret unset to run rules-only
+          # Manual runs follow the checkbox; scheduled runs trade (on the paper account)
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: python -m trader.main
+
+      - name: Save decision log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: decisions
+          path: logs/
+          if-no-files-found: ignore
